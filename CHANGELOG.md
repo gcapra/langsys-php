@@ -5,6 +5,21 @@ All notable changes to the Langsys PHP SDK are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Missing credentials no longer throw from the constructor.** A client built
+  without an API key or project ID is now *unconfigured*: `translate()`,
+  `translateContentBlock()` and `translatePage()` return the source text with
+  placeholders resolved, nothing is fetched or queued for registration, and one
+  warning per process names what to set (`LANGSYS_API_KEY`,
+  `LANGSYS_PROJECT_ID`). Throwing took down whatever built the client - a
+  Laravel app 500'd on every page until its `.env` was filled in. Explicit
+  writes (`registerPhrases()`, `registerContentBlock()`) still throw, with a
+  message that says the client is not configured. `isConfigured()` reports the
+  state. Pass `'require_credentials' => true` to keep the old behaviour.
+
 ## [1.3.1] - 2026-08-16
 
 ### Fixed

@@ -71,20 +71,20 @@ class ClientTest extends TestCase
         $this->assertEquals('env-project-id', $client->getConfig()->getProjectId());
     }
 
-    public function testConstructorMissingApiKey()
+    public function testConstructorMissingApiKeyWithRequireCredentials()
     {
         $this->expectException(LangsysException::class);
         $this->expectExceptionMessage('API key is required');
 
-        new Client(null, 'project-id');
+        new Client(null, 'project-id', ['require_credentials' => true]);
     }
 
-    public function testConstructorMissingProjectId()
+    public function testConstructorMissingProjectIdWithRequireCredentials()
     {
         $this->expectException(LangsysException::class);
         $this->expectExceptionMessage('Project ID is required');
 
-        new Client('api-key', null);
+        new Client('api-key', null, ['require_credentials' => true]);
     }
 
     public function testGetCacheReturnsCache()

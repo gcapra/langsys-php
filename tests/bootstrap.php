@@ -26,3 +26,9 @@ require_once $autoloadFile;
 $warnedFlag = new \ReflectionProperty(\Langsys\SDK\Client::class, 'requirementsWarned');
 $warnedFlag->setAccessible(true);
 $warnedFlag->setValue(null, true);
+
+// Same for the missing-credentials warning: tests that build a client without
+// credentials would otherwise write it to stderr. UnconfiguredClientTest resets it.
+$unconfiguredFlag = new \ReflectionProperty(\Langsys\SDK\Client::class, 'unconfiguredWarned');
+$unconfiguredFlag->setAccessible(true);
+$unconfiguredFlag->setValue(null, true);

@@ -101,12 +101,28 @@ class Client
     protected $interpolator;
 
     /**
+     * @var bool Whether an API key and project ID were supplied.
+     */
+    protected $configured = true;
+
+    /**
+     * @var bool Whether the missing-credentials warning has already been emitted.
+     */
+    protected static $unconfiguredWarned = false;
+
+    /**
      * Create a new Langsys Client.
+     *
+     * Missing credentials do not throw by default. A host that has not set
+     * LANGSYS_API_KEY / LANGSYS_PROJECT_ID yet - a fresh checkout, a CI job, a
+     * framework app booting before its .env is filled in - gets an unconfigured
+     * client that renders source text and never calls the API, plus one warning.
+     * Pass `'require_credentials' => true` to have the constructor throw instead.
      *
      * @param string|null $apiKey API key (or null to use env var)
      * @param string|null $projectId Project ID (or null to use env var)
      * @param array $options Additional options
-     * @throws LangsysException
+     * @throws LangsysException When credentials are missing and require_credentials is set
      */
     public function __construct($apiKey = null, $projectId = null, array $options = [])
     {
@@ -123,12 +139,18 @@ class Client
 
         $this->config = new Config($configOptions);
 
-        // Validate required config
+        $missing = [];
         if (!$this->config->hasApiKey()) {
-            throw new LangsysException('API key is required. Set LANGSYS_API_KEY environment variable or pass it to the constructor.');
+            $missing[] = 'API key (LANGSYS_API_KEY)';
+        }
+        if (!$this->config->hasProjectId()) {
+            $missing[] = 'project ID (LANGSYS_PROJECT_ID)';
         }
 
-        if (!$this->config->hasProjectId()) {
+        if ($missing && !empty($options['require_credentials'])) {
+            if (!$this->config->hasApiKey()) {
+                throw new LangsysException('API key is required. Set LANGSYS_API_KEY environment variable or pass it to the constructor.');
+            }
             throw new LangsysException('Project ID is required. Set LANGSYS_PROJECT_ID environment variable or pass it to the constructor.');
         }
 
@@ -142,6 +164,21 @@ class Client
         // SDK logger themselves can silence the error_log leg.
         if (array_key_exists('warn_runtime_requirements', $options)) {
             $this->warnRuntimeRequirements = (bool) $options['warn_runtime_requirements'];
+        }
+
+        if ($missing) {
+            $this->configured = false;
+            // Once per process, like the requirements check: a framework builds
+            // the client on every request, and a warning per request is noise
+            // that buries the one line saying what to set.
+            if (!self::$unconfiguredWarned) {
+                self::$unconfiguredWarned = true;
+                $this->warnRequirement(
+                    'Langsys SDK is not configured: missing ' . implode(' and ', $missing)
+                        . '. Rendering source text; nothing is fetched from or registered with Langsys.',
+                    ['missing' => $missing]
+                );
+            }
         }
 
         $this->checkRuntimeRequirements();
@@ -162,6 +199,38 @@ class Client
         $this->translations = new Translations($this->http, $this->config->getProjectId(), $this->logger);
         $this->translatableItems = new TranslatableItems($this->http, $this->config->getProjectId(), $this->logger);
         $this->utilities = new Utilities($this->http, $this->config->getProjectId(), $this->logger);
+    }
+
+    /**
+     * Whether the client has an API key and a project ID.
+     *
+     * An unconfigured client renders source text and never calls the API.
+     *
+     * @return bool
+     */
+    public function isConfigured()
+    {
+        return $this->configured;
+    }
+
+    /**
+     * Refuse an explicit write when there are no credentials to write with.
+     *
+     * Rendering degrades quietly; an explicit register call is something the
+     * caller expects to happen, so it says why it cannot rather than blaming
+     * the key type.
+     *
+     * @param string $action
+     * @return void
+     * @throws LangsysException
+     */
+    protected function assertConfigured($action)
+    {
+        if (!$this->configured) {
+            throw new LangsysException(
+                'Cannot ' . $action . ': the client is not configured. Set LANGSYS_API_KEY and LANGSYS_PROJECT_ID.'
+            );
+        }
     }
 
     /**
@@ -319,6 +388,11 @@ class Client
      */
     public function authorize($force = false)
     {
+        if (!$this->configured) {
+            // No key, so no key_type: canWrite() is false and nothing registers.
+            return [];
+        }
+
         if ($this->projectData !== null && !$force) {
             $this->logger->debug('Authorization from memory', [
                 'project_id' => $this->config->getProjectId(),
@@ -414,6 +488,11 @@ class Client
      */
     public function getTranslations($locale, $useCache = true)
     {
+        if (!$this->configured) {
+            // Every lookup misses, so callers render the source phrase.
+            return [];
+        }
+
         $memoryKey = $locale;
         $cacheKey = 'translations_' . $this->config->getProjectId() . '_' . $locale;
 
@@ -555,6 +634,8 @@ class Client
      */
     public function registerPhrases(array $phrases)
     {
+        $this->assertConfigured('register phrases');
+
         if (!$this->canWrite()) {
             throw new LangsysException('Cannot register phrases: API key does not have write permissions');
         }
@@ -578,6 +659,8 @@ class Client
      */
     public function registerContentBlock($content, $category = null, $label = null, $customId = null)
     {
+        $this->assertConfigured('register content block');
+
         if (!$this->canWrite()) {
             throw new LangsysException('Cannot register content block: API key does not have write permissions');
         }
@@ -1161,6 +1244,10 @@ class Client
      */
     public function queuePhraseForRegistration($phrase, $category)
     {
+        if (!$this->configured) {
+            return;
+        }
+
         $key = $category . '::' . $phrase;
 
         // Skip if already queued
@@ -1221,6 +1308,10 @@ class Client
      */
     public function queueContentBlockForRegistration($html, $category, $customId, array $phrases)
     {
+        if (!$this->configured) {
+            return;
+        }
+
         // Skip if already queued
         if (isset($this->pendingContentBlocks[$customId])) {
             return;
