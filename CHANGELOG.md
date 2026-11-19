@@ -5,6 +5,19 @@ All notable changes to the Langsys PHP SDK are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **A legacy key prints its number params as plain digits** (spec MIG-4). In the
+  migration mode, `© :year` with `['year' => 2026]` showed `© 2,026` in English and
+  `© 2 026` in French, because every number param was formatted with the locale's
+  grouping, while Laravel, Rails, gettext, i18next and vue-i18n print it as is. A key hit
+  now prints `© 2026` in every locale, its translation too, and `#` and `{n, number}`
+  likewise; a plural still selects by the number. A call that is not a key hit formats
+  numbers for the locale as before. `Interpolator::interpolate()` takes the same
+  behaviour as a fourth argument, `$plainNumbers`.
+
 ## [2.2.2] - 2026-11-09
 
 ### Fixed

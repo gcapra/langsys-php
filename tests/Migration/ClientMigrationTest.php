@@ -226,4 +226,29 @@ class ClientMigrationTest extends TestCase
         $this->assertSame('UI', $client->resolveLegacyKey('checkout.submit', 'UI')['category']);
         $this->assertNull($client->resolveLegacyKey('Pay now'));
     }
+
+    /**
+     * MIG-4: a key hit prints its number params as plain digits, as i18next
+     * does, its translation too; the same text as a literal is grouped.
+     */
+    public function testAKeyHitPrintsItsNumberParamsAsPlainDigits(): void
+    {
+        file_put_contents($this->dir . '/lang/en.json', json_encode([
+            'footer' => ['copyright' => '© {{year}} Northwind'],
+            'cart' => ['items_one' => '{{count}} item', 'items_other' => '{{count}} items'],
+        ]));
+        $client = $this->inMode(['footer' => ['© {year} Northwind' => '© {year} Northwind, tous droits réservés'], 'cart' => []]);
+
+        foreach (['en-us', 'fr-fr', 'es-es'] as $locale) {
+            $client->setLocale($locale);
+            $this->assertStringStartsWith('© 2026 Northwind', $client->translate('footer.copyright', null, null, null, ['year' => 2026]), $locale);
+        }
+
+        $client->setLocale('en-us');
+        $this->assertSame('1234 items', $client->translate('cart.items', null, null, null, ['count' => 1234]));
+        $this->assertSame('1 item', $client->translate('cart.items', null, null, null, ['count' => 1]));
+        $this->assertStringStartsWith('© 2,026 Northwind', $client->translate('© {year} Northwind', null, 'footer', null, ['year' => 2026]), 'a literal is grouped');
+        $this->assertSame('Order 12,345', $client->translate('Order {id}', null, null, null, ['id' => 12345]), 'a miss is grouped');
+    }
+
 }

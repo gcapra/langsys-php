@@ -1411,4 +1411,33 @@ class InterpolatorTest extends TestCase
             ],
         ];
     }
+
+    /**
+     * MIG-4: plain numbers print as plain digits on every path, and a plural
+     * still selects by the number.
+     */
+    public function testPlainNumbersPrintAsPlainDigits(): void
+    {
+        $this->assertSame('© 2026 Northwind', $this->interpolator->interpolate('© {year} Northwind', ['year' => 2026], 'en-us', true));
+        $this->assertSame('Total 1234.5', $this->interpolator->interpolate('Total {n}', ['n' => 1234.5], 'de-de', true));
+        $this->assertSame('1 item', $this->interpolator->interpolate('{count, plural, one {# item} other {# items}}', ['count' => 1], 'en-us', true));
+        $this->assertSame('1234 items', $this->interpolator->interpolate('{count, plural, one {# item} other {# items}}', ['count' => 1234], 'en-us', true));
+        $this->assertSame('1234 items in 2026', $this->interpolator->interpolate('{count, plural, one {# item} other {{count} items}} in {year}', ['count' => 1234, 'year' => 2026], 'fr-fr', true));
+        $this->assertSame('12345 pts', $this->interpolator->interpolate('{n, number} pts', ['n' => 12345], 'en-us', true));
+        $this->assertSame('1233 others', $this->interpolator->interpolate('{n, plural, offset:1 =1 {just you} other {# others}}', ['n' => 1234], 'en-us', true));
+    }
+
+    public function testPlainNumbersKeepARecoveredSentenceAndHashInASelectAsText(): void
+    {
+        $this->assertSame('They paid 12345', $this->interpolator->interpolate('{g, select, male {He} other {They}} paid {n}', ['n' => 12345], 'en-us', true));
+        $this->assertSame('# 1234', $this->interpolator->interpolate('{n, plural, other {{g, select, other {#}} #}}', ['n' => 1234, 'g' => 'x'], 'en-us', true));
+    }
+
+    public function testWithoutPlainNumbersTheSameCallsAreGroupedForTheLocale(): void
+    {
+        $this->assertSame('© 2,026 Northwind', $this->interpolator->interpolate('© {year} Northwind', ['year' => 2026], 'en-us'));
+        $this->assertSame('1,234 items', $this->interpolator->interpolate('{count, plural, one {# item} other {# items}}', ['count' => 1234], 'en-us'));
+        $this->assertSame('12,345 pts', $this->interpolator->interpolate('{n, number} pts', ['n' => 12345], 'en-us'));
+    }
+
 }

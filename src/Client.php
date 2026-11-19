@@ -313,6 +313,14 @@ class Client
     protected $legacyKeys;
 
     /**
+     * Whether the render in progress is a legacy key hit, which prints its
+     * numbers as plain digits (MIG-4).
+     *
+     * @var bool
+     */
+    protected $renderingLegacyHit = false;
+
+    /**
      * Create a new Langsys Client.
      *
      * @param string|null $apiKey API key (or null to use env var)
@@ -1531,6 +1539,7 @@ class Client
         // category unless the caller chose one. A miss is literal source text,
         // except a package key, which never registers as a key-shaped phrase.
         $legacy = $contentBlockId === null ? $this->getLegacyKeys() : null;
+        $hit = false;
 
         if ($legacy !== null && is_string($phrase)) {
             $entry = $legacy->resolve($phrase);
@@ -1551,6 +1560,7 @@ class Client
                 }
 
                 $phrase = $entry['phrase'];
+                $hit = true;
 
                 if (($category === null || $category === '' || $category === self::UNCATEGORIZED) && $entry['category'] !== null) {
                     $category = $entry['category'];
@@ -1571,7 +1581,16 @@ class Client
             }
         }
 
-        return $this->translateSource($phrase, $locale, $category, $contentBlockId, $params, true, $from, $argument, $earlier, $previousCategory);
+        // MIG-4: a hit prints its number params as plain digits, as the
+        // source framework did, its source and its translation alike.
+        $previousHit = $this->renderingLegacyHit;
+        $this->renderingLegacyHit = $hit;
+
+        try {
+            return $this->translateSource($phrase, $locale, $category, $contentBlockId, $params, true, $from, $argument, $earlier, $previousCategory);
+        } finally {
+            $this->renderingLegacyHit = $previousHit;
+        }
     }
 
     /**
@@ -2488,7 +2507,7 @@ class Client
         // the case that can skip it. Returning early here shipped raw
         // MessageFormat source to the page. The interpolator has its own fast
         // path for text with no construct in it.
-        return $this->getInterpolator()->interpolate($text, \Langsys\SDK\Html\ValueMarkers::forText($params, $text), $locale);
+        return $this->getInterpolator()->interpolate($text, \Langsys\SDK\Html\ValueMarkers::forText($params, $text), $locale, $this->renderingLegacyHit);
     }
 
     /**

@@ -100,14 +100,44 @@ class Interpolator
     protected $warnedFormatterFailures = [];
 
     /**
+     * Whether the render in progress prints numbers as plain digits (MIG-4).
+     *
+     * @var bool
+     */
+    protected $plainNumbers = false;
+
+    /**
      * Interpolate parameters into a string.
      *
      * @param string $text The (already translated) string
      * @param array $params Map of placeholder name => value
      * @param string|null $locale Target locale, drives plural rules and formatting
+     * @param bool $plainNumbers Print numbers as plain digits, `#` included, as a
+     *                           legacy key's source framework does (MIG-4); a
+     *                           plural still selects by the number
      * @return string
      */
-    public function interpolate($text, array $params = [], $locale = null)
+    public function interpolate($text, array $params = [], $locale = null, $plainNumbers = false)
+    {
+        $previous = $this->plainNumbers;
+        $this->plainNumbers = (bool) $plainNumbers;
+
+        try {
+            return $this->interpolateText($text, $params, $locale);
+        } finally {
+            $this->plainNumbers = $previous;
+        }
+    }
+
+    /**
+     * interpolate()'s body.
+     *
+     * @param string $text
+     * @param array $params
+     * @param string|null $locale
+     * @return string
+     */
+    protected function interpolateText($text, array $params, $locale)
     {
         if (!is_string($text) || $text === '') {
             return $text;
@@ -283,6 +313,14 @@ class Interpolator
                 : $icuValue;
         }
 
+        // MIG-4: with plain numbers, `#` and `{n, number}` become arguments of
+        // their own holding the number as text, which intl writes as it is.
+        if ($this->plainNumbers) {
+            $plain = [];
+            $text = $this->plainNumberPattern($text, $params, $this->plainArgumentPrefix($text, $params), $plain);
+            $icuParams += $plain;
+        }
+
         // intl can THROW rather than return a falsy value: MessageFormatter
         // raises IntlException when intl.use_exceptions is On, and @ does not
         // suppress exceptions. Escaping here would break the render, which this
@@ -323,6 +361,158 @@ class Interpolator
             ]);
             return null;
         }
+    }
+
+    /**
+     * The pattern with each `#` and style-less `{n, number}` given a number
+     * replaced by an argument of its own, whose value, in $plain, is the number
+     * as plain digits. A plural keeps its own argument, so it still selects by
+     * the number. `#` belongs to the plural whose branch holds it directly, as
+     * ICU reads it: in a select's branch it is text.
+     *
+     * @param string $text
+     * @param array $params
+     * @param string $prefix
+     * @param array $plain Filled with argument name => plain digits
+     * @param string|null $hash The argument a `#` here stands for
+     * @param int $offset That plural's offset
+     * @param int $depth
+     * @return string
+     */
+    protected function plainNumberPattern($text, array $params, $prefix, array &$plain, $hash = null, $offset = 0, $depth = 0)
+    {
+        if ($depth > self::MAX_ICU_DEPTH) {
+            return $text;
+        }
+
+        $out = '';
+        $length = strlen($text);
+        $i = 0;
+
+        while ($i < $length) {
+            $char = $text[$i];
+
+            if ($char === '#' && $hash !== null) {
+                $out .= $this->plainArgument($this->toIcuValue($params[$hash]) - $offset, $prefix, $plain);
+                $i++;
+                continue;
+            }
+
+            if ($char !== '{') {
+                $out .= $char;
+                $i++;
+                continue;
+            }
+
+            $end = $this->matchingBrace($text, $i);
+
+            if ($end === null) {
+                $out .= substr($text, $i);
+                break;
+            }
+
+            $out .= $this->plainNumberArgument(substr($text, $i + 1, $end - $i - 1), $params, $prefix, $plain, $depth);
+            $i = $end + 1;
+        }
+
+        return $out;
+    }
+
+    /**
+     * One argument of plainNumberPattern(), braces included.
+     *
+     * @param string $body The text between the argument's braces
+     * @param array $params
+     * @param string $prefix
+     * @param array $plain
+     * @param int $depth
+     * @return string
+     */
+    protected function plainNumberArgument($body, array $params, $prefix, array &$plain, $depth)
+    {
+        $comma = strpos($body, ',');
+
+        if ($comma === false) {
+            return '{' . $body . '}';
+        }
+
+        $name = trim(substr($body, 0, $comma));
+        $rest = substr($body, $comma + 1);
+        $secondComma = strpos($rest, ',');
+        $type = strtolower(trim($secondComma === false ? $rest : substr($rest, 0, $secondComma)));
+        $value = array_key_exists($name, $params) ? $this->toIcuValue($params[$name]) : null;
+        $numeric = is_int($value) || is_float($value);
+
+        if ($type === 'number' && $secondComma === false) {
+            return $numeric ? $this->plainArgument($value, $prefix, $plain) : '{' . $body . '}';
+        }
+
+        if ($secondComma === false || !in_array($type, ['plural', 'selectordinal', 'select'], true)) {
+            return '{' . $body . '}';
+        }
+
+        $branches = substr($rest, $secondComma + 1);
+        $hash = $type !== 'select' && $numeric ? $name : null;
+        $offset = $hash !== null && preg_match('/^\s*offset\s*:\s*(\d+)/', $branches, $match) ? (int) $match[1] : 0;
+
+        $out = '';
+        $length = strlen($branches);
+        $i = 0;
+
+        while ($i < $length) {
+            if ($branches[$i] !== '{') {
+                $out .= $branches[$i];
+                $i++;
+                continue;
+            }
+
+            $end = $this->matchingBrace($branches, $i);
+
+            if ($end === null) {
+                $out .= substr($branches, $i);
+                break;
+            }
+
+            $out .= '{' . $this->plainNumberPattern(substr($branches, $i + 1, $end - $i - 1), $params, $prefix, $plain, $hash, $offset, $depth + 1) . '}';
+            $i = $end + 1;
+        }
+
+        return '{' . substr($body, 0, $comma + 1) . substr($rest, 0, $secondComma + 1) . $out . '}';
+    }
+
+    /**
+     * A new argument holding a number as plain digits.
+     *
+     * @param int|float $value
+     * @param string $prefix
+     * @param array $plain
+     * @return string
+     */
+    protected function plainArgument($value, $prefix, array &$plain)
+    {
+        $name = $prefix . count($plain);
+        $plain[$name] = (string) $value;
+
+        return '{' . $name . '}';
+    }
+
+    /**
+     * An argument-name prefix nothing in the text or the params uses.
+     *
+     * @param string $text
+     * @param array $params
+     * @return string
+     */
+    protected function plainArgumentPrefix($text, array $params)
+    {
+        $prefix = 'langsys_plain_';
+        $taken = $text . "\0" . implode("\0", array_map('strval', array_keys($params)));
+
+        while (strpos($taken, $prefix) !== false) {
+            $prefix = 'x' . $prefix;
+        }
+
+        return $prefix;
     }
 
     /**
@@ -1017,7 +1207,7 @@ class Interpolator
      */
     protected function formatNumber($value, $locale)
     {
-        if (!$this->hasIntl()) {
+        if ($this->plainNumbers || !$this->hasIntl()) {
             return (string) $value;
         }
 

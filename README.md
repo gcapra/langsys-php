@@ -1467,6 +1467,11 @@ echo $client->translate('checkout.submit'); // looks up "Place order" in your fi
   `%(name)s` and `%(name)d` all become `{name}`, and `%%` is a literal `%`. A placeholder
   carrying number formatting (`%.2f`, `%(amount).2f`) or no name (`%s`) is registered as
   written, with a warning.
+- **A key's number params print as plain digits**, as Laravel and the other frameworks
+  print them: `translate('footer.copyright', null, null, null, ['year' => 2026])` on
+  `© :year` shows `© 2026` in every locale, `#` in a plural included, and the plural still
+  selects by the number. A call that is not a key hit formats numbers for the locale
+  (`© 2,026` in English), as always.
 - **Plurals are converted by the file's format**: `laravel`, `vue-i18n`, `i18next` or
   `plain`. The frameworks read the same characters differently (`car | cars` is a
   plural in vue-i18n and plain text in Laravel), so each file says which one wrote it.
