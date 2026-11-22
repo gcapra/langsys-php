@@ -1424,6 +1424,15 @@ class InterpolatorTest extends TestCase
         $this->assertSame('1234 items', $this->interpolator->interpolate('{count, plural, one {# item} other {# items}}', ['count' => 1234], 'en-us', true));
         $this->assertSame('1234 items in 2026', $this->interpolator->interpolate('{count, plural, one {# item} other {{count} items}} in {year}', ['count' => 1234, 'year' => 2026], 'fr-fr', true));
         $this->assertSame('12345 pts', $this->interpolator->interpolate('{n, number} pts', ['n' => 12345], 'en-us', true));
+    }
+
+    /**
+     * An offset is ICU's: without ext-intl the plural has no offset to subtract.
+     */
+    public function testPlainNumbersSubtractAPluralsOffset(): void
+    {
+        $this->requireIntl();
+
         $this->assertSame('1233 others', $this->interpolator->interpolate('{n, plural, offset:1 =1 {just you} other {# others}}', ['n' => 1234], 'en-us', true));
     }
 
@@ -1435,6 +1444,8 @@ class InterpolatorTest extends TestCase
 
     public function testWithoutPlainNumbersTheSameCallsAreGroupedForTheLocale(): void
     {
+        $this->requireIntl();
+
         $this->assertSame('© 2,026 Northwind', $this->interpolator->interpolate('© {year} Northwind', ['year' => 2026], 'en-us'));
         $this->assertSame('1,234 items', $this->interpolator->interpolate('{count, plural, one {# item} other {# items}}', ['count' => 1234], 'en-us'));
         $this->assertSame('12,345 pts', $this->interpolator->interpolate('{n, number} pts', ['n' => 12345], 'en-us'));

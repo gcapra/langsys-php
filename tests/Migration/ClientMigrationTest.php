@@ -229,7 +229,7 @@ class ClientMigrationTest extends TestCase
 
     /**
      * MIG-4: a key hit prints its number params as plain digits, as i18next
-     * does, its translation too; the same text as a literal is grouped.
+     * does, its translation too.
      */
     public function testAKeyHitPrintsItsNumberParamsAsPlainDigits(): void
     {
@@ -247,6 +247,24 @@ class ClientMigrationTest extends TestCase
         $client->setLocale('en-us');
         $this->assertSame('1234 items', $client->translate('cart.items', null, null, null, ['count' => 1234]));
         $this->assertSame('1 item', $client->translate('cart.items', null, null, null, ['count' => 1]));
+    }
+
+    /**
+     * The same text as a literal, or a call no key answers, is grouped for the
+     * locale as before. Grouping needs ext-intl: without it no number is grouped.
+     */
+    public function testALiteralOrAMissStillGroupsItsNumberParams(): void
+    {
+        if (!extension_loaded('intl')) {
+            $this->markTestSkipped('ext-intl is not available');
+        }
+
+        file_put_contents($this->dir . '/lang/en.json', json_encode([
+            'footer' => ['copyright' => '© {{year}} Northwind'],
+        ]));
+        $client = $this->inMode(['footer' => ['© {year} Northwind' => '© {year} Northwind, tous droits réservés']]);
+        $client->setLocale('en-us');
+
         $this->assertStringStartsWith('© 2,026 Northwind', $client->translate('© {year} Northwind', null, 'footer', null, ['year' => 2026]), 'a literal is grouped');
         $this->assertSame('Order 12,345', $client->translate('Order {id}', null, null, null, ['id' => 12345]), 'a miss is grouped');
     }
